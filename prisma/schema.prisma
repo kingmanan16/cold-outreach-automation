@@ -1,0 +1,308 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model SystemSettings {
+  id                    String   @id @default("default")
+  globalPaused          Boolean  @default(false)
+  bouncePauseThreshold  Float    @default(0.05)
+  bounceMinSample       Int      @default(20)
+  slackWebhookUrl       String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+enum UserRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String?
+  passwordHash String
+  role         UserRole @default(MEMBER)
+  workspaceId  String?
+  workspace    Workspace? @relation(fields: [workspaceId], references: [id])
+  createdAt    DateTime @default(now())
+  auditLogs    AuditLog[]
+}
+
+model Workspace {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  users     User[]
+  accounts  EmailAccount[]
+  lists     LeadList[]
+  campaigns Campaign[]
+  suppressions Suppression[]
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  action    String
+  meta      Json?
+  createdAt DateTime @default(now())
+}
+
+model EmailAccount {
+  id               String            @id @default(cuid())
+  workspaceId      String?
+  workspace        Workspace?        @relation(fields: [workspaceId], references: [id])
+  email            String            @unique
+  displayName      String?
+  smtpHost         String
+  smtpPort         Int
+  smtpSecure       Boolean           @default(true)
+  smtpUser         String
+  smtpPassEnc      String
+  imapHost         String
+  imapPort         Int
+  imapUser         String
+  imapPassEnc      String
+  oauthProvider    String?
+  oauthAccessEnc   String?
+  oauthRefreshEnc  String?
+  oauthExpiry      DateTime?
+  dailyLimit       Int               @default(30)
+  sentToday        Int               @default(0)
+  lastResetDate    DateTime          @default(now())
+  isWarmedUp       Boolean           @default(false)
+  warmupEnabled    Boolean           @default(false)
+  reputationScore  Float             @default(50)
+  disabled         Boolean           @default(false)
+  lastCheckedAt    DateTime?
+  spfOk            Boolean?
+  dkimOk           Boolean?
+  dmarcOk          Boolean?
+  dnsCheckedAt     DateTime?
+  createdAt        DateTime          @default(now())
+  sentEmails       SentEmail[]
+  replies          Reply[]
+  campaignAccounts CampaignAccount[]
+  warmupMessages   WarmupMessage[]
+}
+
+model LeadList {
+  id          String     @id @default(cuid())
+  workspaceId String?
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id])
+  name        String
+  createdAt   DateTime   @default(now())
+  leads       Lead[]
+}
+
+enum LeadStatus {
+  NEW
+  QUEUED
+  CONTACTED
+  REPLIED
+  INTERESTED
+  NOT_INTERESTED
+  BOUNCED
+  UNSUBSCRIBED
+  NEGOTIATING
+  WON
+  LOST
+}
+
+model Lead {
+  id            String         @id @default(cuid())
+  email         String         @unique
+  firstName     String?
+  lastName      String?
+  company       String?
+  customFields  Json?
+  status        LeadStatus     @default(NEW)
+  listId        String
+  list          LeadList       @relation(fields: [listId], references: [id])
+  hubspotId     String?
+  campaignLeads CampaignLead[]
+  sentEmails    SentEmail[]
+  replies       Reply[]
+  notes         Note[]
+  events        LeadEvent[]
+  reminderAt    DateTime?
+  createdAt     DateTime       @default(now())
+}
+
+model LeadEvent {
+  id        String   @id @default(cuid())
+  leadId    String
+  lead      Lead     @relation(fields: [leadId], references: [id])
+  type      String
+  meta      Json?
+  createdAt DateTime @default(now())
+
+  @@index([leadId, createdAt])
+}
+
+model Suppression {
+  id          String     @id @default(cuid())
+  workspaceId String?
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id])
+  email       String     @unique
+  reason      String?
+  createdAt   DateTime   @default(now())
+}
+
+enum CampaignStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  COMPLETED
+}
+
+model Campaign {
+  id                  String            @id @default(cuid())
+  workspaceId         String?
+  workspace           Workspace?        @relation(fields: [workspaceId], references: [id])
+  name                String
+  status              CampaignStatus    @default(DRAFT)
+  pausedByKillSwitch  Boolean           @default(false)
+  dailyCap            Int               @default(45)
+  sendGapSec          Int               @default(90)
+  maxPerTick          Int               @default(5)
+  // Follow-ups reply inside Mail 1's thread, from Mail 1's mailbox.
+  threadFollowUps     Boolean           @default(true)
+  timezone            String            @default("Asia/Kolkata")
+  scheduledStartAt    DateTime?
+  sendWindowStartMin  Int               @default(540)
+  sendWindowEndMin    Int               @default(1080)
+  sendDays            Json              @default("[1,2,3,4,5]")
+  steps               CampaignStep[]
+  campaignLeads       CampaignLead[]
+  campaignAccounts    CampaignAccount[]
+  createdAt           DateTime          @default(now())
+}
+
+model CampaignAccount {
+  campaignId String
+  campaign   Campaign     @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  accountId  String
+  account    EmailAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@id([campaignId, accountId])
+}
+
+model CampaignStep {
+  id         String   @id @default(cuid())
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id])
+  stepOrder  Int
+  delayDays  Int
+  subject    String
+  subjectB   String?
+  body       String
+  bodyB      String?
+  winner     String?
+}
+
+enum CampaignLeadStatus {
+  ACTIVE
+  REPLIED
+  COMPLETED
+  STOPPED
+  BOUNCED
+}
+
+model CampaignLead {
+  id               String             @id @default(cuid())
+  campaignId       String
+  campaign         Campaign           @relation(fields: [campaignId], references: [id])
+  leadId           String
+  lead             Lead               @relation(fields: [leadId], references: [id])
+  currentStep      Int                @default(0)
+  nextSendAt       DateTime?
+  status           CampaignLeadStatus @default(ACTIVE)
+  lastMessageId    String?
+  bypassWindowOnce Boolean            @default(false)
+
+  @@unique([campaignId, leadId])
+}
+
+model SentEmail {
+  id                String       @id @default(cuid())
+  leadId            String
+  lead              Lead         @relation(fields: [leadId], references: [id])
+  accountId         String
+  account           EmailAccount @relation(fields: [accountId], references: [id])
+  campaignId        String?
+  stepOrder         Int?
+  subject           String
+  subjectVariant    String?
+  messageId         String       @unique
+  inReplyToMessageId String?
+  isManualReply     Boolean      @default(false)
+  sentAt            DateTime     @default(now())
+  opened            Boolean      @default(false)
+  clicked           Boolean      @default(false)
+  bounced           Boolean      @default(false)
+
+  @@index([campaignId, leadId, stepOrder])
+}
+
+model Note {
+  id        String   @id @default(cuid())
+  leadId    String
+  lead      Lead     @relation(fields: [leadId], references: [id])
+  content   String
+  createdAt DateTime @default(now())
+}
+
+model Reply {
+  id           String       @id @default(cuid())
+  leadId       String
+  lead         Lead         @relation(fields: [leadId], references: [id])
+  accountId    String
+  account      EmailAccount @relation(fields: [accountId], references: [id])
+  receivedAt   DateTime     @default(now())
+  snippet      String?
+  body         String?
+  category     String?
+  messageId    String?      @unique
+  readAt       DateTime?
+  snoozedUntil DateTime?
+
+  @@index([receivedAt])
+  @@index([category])
+  @@index([leadId])
+}
+
+model WarmupMessage {
+  id        String       @id @default(cuid())
+  accountId String
+  account   EmailAccount @relation(fields: [accountId], references: [id])
+  toEmail   String
+  subject   String
+  sentAt    DateTime     @default(now())
+  replied   Boolean      @default(false)
+}
+
+model WebhookEndpoint {
+  id        String   @id @default(cuid())
+  url       String
+  events    Json
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+model PlacementTest {
+  id        String   @id @default(cuid())
+  accountId String
+  provider  String
+  result    String
+  score     Float?
+  raw       Json?
+  createdAt DateTime @default(now())
+}

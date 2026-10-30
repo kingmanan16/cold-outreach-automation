@@ -1,0 +1,160 @@
+-- AlterTable
+ALTER TABLE "EmailAccount" ADD COLUMN IF NOT EXISTS "workspaceId" TEXT;
+ALTER TABLE "EmailAccount" ADD COLUMN IF NOT EXISTS "displayName" TEXT;
+ALTER TABLE "EmailAccount" ADD COLUMN IF NOT EXISTS "oauthProvider" TEXT;
+ALTER TABLE "EmailAccount" ADD COLUMN IF NOT EXISTS "oauthAccessEnc" TEXT;
+ALTER TABLE "EmailAccount" ADD COLUMN IF NOT EXISTS "oauthRefreshEnc" TEXT;
+ALTER TABLE "EmailAccount" ADD COLUMN IF NOT EXISTS "oauthExpiry" TIMESTAMP(3);
+ALTER TABLE "EmailAccount" ADD COLUMN IF NOT EXISTS "warmupEnabled" BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE "EmailAccount" ADD COLUMN IF NOT EXISTS "reputationScore" DOUBLE PRECISION NOT NULL DEFAULT 50;
+ALTER TABLE "EmailAccount" ADD COLUMN IF NOT EXISTS "disabled" BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE "EmailAccount" ADD COLUMN IF NOT EXISTS "spfOk" BOOLEAN;
+ALTER TABLE "EmailAccount" ADD COLUMN IF NOT EXISTS "dkimOk" BOOLEAN;
+ALTER TABLE "EmailAccount" ADD COLUMN IF NOT EXISTS "dmarcOk" BOOLEAN;
+ALTER TABLE "EmailAccount" ADD COLUMN IF NOT EXISTS "dnsCheckedAt" TIMESTAMP(3);
+
+ALTER TABLE "LeadList" ADD COLUMN IF NOT EXISTS "workspaceId" TEXT;
+
+-- Lead status enum extensions
+DO $$ BEGIN
+  ALTER TYPE "LeadStatus" ADD VALUE IF NOT EXISTS 'NEGOTIATING';
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TYPE "LeadStatus" ADD VALUE IF NOT EXISTS 'WON';
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TYPE "LeadStatus" ADD VALUE IF NOT EXISTS 'LOST';
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+ALTER TABLE "Lead" ADD COLUMN IF NOT EXISTS "hubspotId" TEXT;
+
+ALTER TABLE "Campaign" ADD COLUMN IF NOT EXISTS "workspaceId" TEXT;
+ALTER TABLE "Campaign" ADD COLUMN IF NOT EXISTS "timezone" TEXT NOT NULL DEFAULT 'Asia/Kolkata';
+ALTER TABLE "Campaign" ADD COLUMN IF NOT EXISTS "scheduledStartAt" TIMESTAMP(3);
+ALTER TABLE "Campaign" ADD COLUMN IF NOT EXISTS "sendWindowStartMin" INTEGER NOT NULL DEFAULT 540;
+ALTER TABLE "Campaign" ADD COLUMN IF NOT EXISTS "sendWindowEndMin" INTEGER NOT NULL DEFAULT 1080;
+ALTER TABLE "Campaign" ADD COLUMN IF NOT EXISTS "sendDays" JSONB NOT NULL DEFAULT '[1,2,3,4,5]';
+
+ALTER TABLE "CampaignStep" ADD COLUMN IF NOT EXISTS "bodyB" TEXT;
+ALTER TABLE "CampaignStep" ADD COLUMN IF NOT EXISTS "winner" TEXT;
+
+ALTER TABLE "CampaignLead" ADD COLUMN IF NOT EXISTS "bypassWindowOnce" BOOLEAN NOT NULL DEFAULT false;
+
+ALTER TABLE "SentEmail" ADD COLUMN IF NOT EXISTS "inReplyToMessageId" TEXT;
+ALTER TABLE "SentEmail" ADD COLUMN IF NOT EXISTS "isManualReply" BOOLEAN NOT NULL DEFAULT false;
+
+ALTER TABLE "Reply" ADD COLUMN IF NOT EXISTS "readAt" TIMESTAMP(3);
+ALTER TABLE "Reply" ADD COLUMN IF NOT EXISTS "snoozedUntil" TIMESTAMP(3);
+
+CREATE TABLE IF NOT EXISTS "SystemSettings" (
+  "id" TEXT NOT NULL,
+  "globalPaused" BOOLEAN NOT NULL DEFAULT false,
+  "bouncePauseThreshold" DOUBLE PRECISION NOT NULL DEFAULT 0.05,
+  "bounceMinSample" INTEGER NOT NULL DEFAULT 20,
+  "slackWebhookUrl" TEXT,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT "SystemSettings_pkey" PRIMARY KEY ("id")
+);
+
+INSERT INTO "SystemSettings" ("id", "updatedAt") VALUES ('default', CURRENT_TIMESTAMP)
+ON CONFLICT ("id") DO NOTHING;
+
+DO $$ BEGIN
+  CREATE TYPE "UserRole" AS ENUM ('OWNER', 'ADMIN', 'MEMBER');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+CREATE TABLE IF NOT EXISTS "Workspace" (
+  "id" TEXT NOT NULL,
+  "name" TEXT NOT NULL,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT "Workspace_pkey" PRIMARY KEY ("id")
+);
+
+CREATE TABLE IF NOT EXISTS "User" (
+  "id" TEXT NOT NULL,
+  "email" TEXT NOT NULL,
+  "name" TEXT,
+  "passwordHash" TEXT NOT NULL,
+  "role" "UserRole" NOT NULL DEFAULT 'MEMBER',
+  "workspaceId" TEXT,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT "User_pkey" PRIMARY KEY ("id")
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS "User_email_key" ON "User"("email");
+
+CREATE TABLE IF NOT EXISTS "AuditLog" (
+  "id" TEXT NOT NULL,
+  "userId" TEXT,
+  "action" TEXT NOT NULL,
+  "meta" JSONB,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT "AuditLog_pkey" PRIMARY KEY ("id")
+);
+
+CREATE TABLE IF NOT EXISTS "LeadEvent" (
+  "id" TEXT NOT NULL,
+  "leadId" TEXT NOT NULL,
+  "type" TEXT NOT NULL,
+  "meta" JSONB,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT "LeadEvent_pkey" PRIMARY KEY ("id")
+);
+
+CREATE INDEX IF NOT EXISTS "LeadEvent_leadId_createdAt_idx" ON "LeadEvent"("leadId", "createdAt");
+
+CREATE TABLE IF NOT EXISTS "Suppression" (
+  "id" TEXT NOT NULL,
+  "workspaceId" TEXT,
+  "email" TEXT NOT NULL,
+  "reason" TEXT,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT "Suppression_pkey" PRIMARY KEY ("id")
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS "Suppression_email_key" ON "Suppression"("email");
+
+CREATE TABLE IF NOT EXISTS "CampaignAccount" (
+  "campaignId" TEXT NOT NULL,
+  "accountId" TEXT NOT NULL,
+  CONSTRAINT "CampaignAccount_pkey" PRIMARY KEY ("campaignId","accountId")
+);
+
+CREATE TABLE IF NOT EXISTS "WarmupMessage" (
+  "id" TEXT NOT NULL,
+  "accountId" TEXT NOT NULL,
+  "toEmail" TEXT NOT NULL,
+  "subject" TEXT NOT NULL,
+  "sentAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "replied" BOOLEAN NOT NULL DEFAULT false,
+  CONSTRAINT "WarmupMessage_pkey" PRIMARY KEY ("id")
+);
+
+CREATE TABLE IF NOT EXISTS "WebhookEndpoint" (
+  "id" TEXT NOT NULL,
+  "url" TEXT NOT NULL,
+  "events" JSONB NOT NULL,
+  "active" BOOLEAN NOT NULL DEFAULT true,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT "WebhookEndpoint_pkey" PRIMARY KEY ("id")
+);
+
+CREATE TABLE IF NOT EXISTS "PlacementTest" (
+  "id" TEXT NOT NULL,
+  "accountId" TEXT NOT NULL,
+  "provider" TEXT NOT NULL,
+  "result" TEXT NOT NULL,
+  "score" DOUBLE PRECISION,
+  "raw" JSONB,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT "PlacementTest_pkey" PRIMARY KEY ("id")
+);
+
+CREATE INDEX IF NOT EXISTS "Reply_receivedAt_idx" ON "Reply"("receivedAt");
+CREATE INDEX IF NOT EXISTS "Reply_category_idx" ON "Reply"("category");
+CREATE INDEX IF NOT EXISTS "Reply_leadId_idx" ON "Reply"("leadId");

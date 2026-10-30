@@ -1,0 +1,10 @@
+# Worker service config. Web app stays on Vercel (see vercel.json).
+
+[build]
+builder = "NIXPACKS"
+buildCommand = "npx prisma generate"
+
+[deploy]
+startCommand = "npm run worker"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10

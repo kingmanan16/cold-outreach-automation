@@ -1,0 +1,17 @@
+# Railway worker only — do NOT run Next.js production build here.
+# Vercel uses vercel.json for the web app build.
+
+[variables]
+NIXPACKS_NODE_VERSION = "20"
+
+[phases.install]
+cmds = ["npm install"]
+
+[phases.build]
+dependsOn = ["install"]
+cmds = ["npx prisma generate"]
+
+# Apply pending migrations before the worker starts, so a deploy can never
+# leave the code ahead of the database schema.
+[start]
+cmd = "npx prisma migrate deploy && npm run worker"
